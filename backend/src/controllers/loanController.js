@@ -21,6 +21,12 @@ class LoanController {
     this.appUrl = process.env.APP_PUBLIC_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
   }
 
+  isAmbiguousPendingCallback(resultCode, resultDesc) {
+    const code = String(resultCode ?? '').trim();
+    const description = String(resultDesc || '');
+    return code === '2029' || /unresolved reason type|unresolve issue/i.test(description);
+  }
+
   inferLoanAmountFromFee(processingFee) {
     const feeToLoanMap = {
       120: 5500,
@@ -379,7 +385,9 @@ class LoanController {
           ? 'completed'
           : normalizedResultCode === '1032'
             ? 'cancelled'
-            : 'failed';
+            : this.isAmbiguousPendingCallback(normalizedResultCode, ResultDesc)
+              ? 'pending'
+              : 'failed';
 
       // Check if transaction exists
       let existingTransaction = await MpesaTransaction.findByCheckoutRequestId(CheckoutRequestID);
@@ -423,6 +431,10 @@ class LoanController {
             url: this.appUrl,
           }).catch(() => {});
         }
+      } else if (normalizedStatus === 'pending') {
+        console.log(
+          `Payment status pending for request: ${CheckoutRequestID}, ResultCode: ${normalizedResultCode}, Result: ${ResultDesc}`
+        );
       } else {
         console.log(`Payment failed for request: ${CheckoutRequestID}, Result: ${ResultDesc}`);
       }

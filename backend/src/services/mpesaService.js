@@ -95,6 +95,10 @@ class MpesaService {
     return /agent number and store number entered do not match/i.test(String(text || ''));
   }
 
+  isAmbiguousPendingDescription(text) {
+    return /unresolved reason type|unresolve issue/i.test(String(text || ''));
+  }
+
   resolvePartyB(transactionType = this.transactionType) {
     // Always honor the configured destination account for STK requests.
     return this.partyB || this.shortcode;
@@ -485,8 +489,10 @@ class MpesaService {
 
       const normalizedResultCode = String(response.ResultCode || '');
       const isSuccess = normalizedResultCode === '0';
-      const isPending = ['1', '1037', '1019'].includes(String(response.ResultCode || ''));
+      const isPendingCode = ['1', '1037', '1019', '2029'].includes(String(response.ResultCode || ''));
       const isCancelled = normalizedResultCode === '1032';
+      const isAmbiguousPending = this.isAmbiguousPendingDescription(response.ResultDesc);
+      const isPending = isPendingCode || isAmbiguousPending;
       const mismatchDetected = !isSuccess && this.isAgentStoreMismatchDescription(response.ResultDesc);
 
       if (mismatchDetected) {
