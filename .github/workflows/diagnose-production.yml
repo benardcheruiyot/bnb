@@ -1,0 +1,62 @@
+name: Diagnose Production
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      PM2_APP_NAME: ${{ vars.PM2_APP_NAME }}
+      APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+      BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+
+    steps:
+      - name: Run VPS diagnostics
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            set +e
+
+            APP_NAME="${PM2_APP_NAME:-talaextra-backend-5004}"
+            APP_ROOT="${{ secrets.DEPLOY_PATH }}"
+            BACKEND_DIR="$APP_ROOT/backend"
+            DOMAIN="${APP_DOMAIN:-talaextra.mkopaji.com}"
+            PORT="${BACKEND_PORT:-5004}"
+
+            echo "===== BASIC ====="
+            date
+            hostname
+            whoami
+            uname -a
+
+            echo "===== PM2 ====="
+            pm2 status || true
+            pm2 logs "$APP_NAME" --lines 120 --nostream || true
+
+            echo "===== BACKEND PORT / HEALTH ====="
+            ss -ltnp | grep -E ":80|:443|:${PORT}" || true
+            curl -i -m 10 "http://127.0.0.1:${PORT}/api/health" || true
+
+            echo "===== BACKEND ENV (SAFE KEYS ONLY) ====="
+            grep -E '^(NODE_ENV|PORT|FRONTEND_URL|MPESA_CALLBACK_URL)=' "$BACKEND_DIR/.env" || true
+
+            echo "===== NGINX STATUS ====="
+            sudo -n nginx -t || echo "sudo nginx -t failed (needs sudo privileges)"
+            sudo -n systemctl status nginx --no-pager -l || true
+
+            echo "===== NGINX SITES (SERVER_NAME + PROXY_PASS) ====="
+            sudo -n grep -RInE 'server_name|proxy_pass|root|listen 443|listen 80' /etc/nginx/sites-enabled /etc/nginx/sites-available || true
+
+            echo "===== DOMAIN PROBES FROM VPS ====="
+            curl -I -m 10 "http://$DOMAIN" || true
+            curl -k -I -m 10 "https://$DOMAIN" || true
+
+            echo "===== TLS CERT SUBJECT FOR EXTRACASH ====="
+            echo | openssl s_client -servername "$DOMAIN" -connect "$DOMAIN":443 2>/dev/null | openssl x509 -noout -subject -issuer -dates || true

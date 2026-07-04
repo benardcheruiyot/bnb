@@ -1,0 +1,19 @@
+name: Promote To Production
+
+on:
+  workflow_run:
+    workflows:
+      - Deploy Staging
+    types:
+      - completed
+
+jobs:
+  promote:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger production deployment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run deploy-production.yml --ref main

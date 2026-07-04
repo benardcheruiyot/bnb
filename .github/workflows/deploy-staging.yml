@@ -1,0 +1,149 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Install sshpass (password fallback)
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: Prepare env files from GitHub Secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${{ secrets.BACKEND_ENV_FILE }}" ]; then
+            echo "Missing required secret: BACKEND_ENV_FILE"
+            exit 1
+          fi
+
+          if [ -z "${{ secrets.FRONTEND_ENV_FILE }}" ]; then
+            echo "Missing required secret: FRONTEND_ENV_FILE"
+            exit 1
+          fi
+
+          printf '%s' "${{ secrets.BACKEND_ENV_FILE }}" > backend/.env
+          printf '%s' "${{ secrets.FRONTEND_ENV_FILE }}" > frontend/.env
+
+      - name: Run full remote recovery deployment
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          SSH_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
+          DEPLOY_REPO: ${{ vars.DEPLOY_REPO }}
+          DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          PM2_APP_NAME: ${{ vars.PM2_APP_NAME }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_DOMAIN:-}" ]; then
+            echo "Missing required repository/environment variable: APP_DOMAIN"
+            exit 1
+          fi
+
+          if [ -z "${CERTBOT_EMAIL:-}" ]; then
+            echo "Missing required repository/environment variable: CERTBOT_EMAIL"
+            exit 1
+          fi
+
+          chmod +x ./deploy_and_restart.sh
+
+          ARGS=(
+            --host "$DEPLOY_HOST"
+            --domain "$APP_DOMAIN"
+            --email "$CERTBOT_EMAIL"
+          )
+
+          if [ -n "${DEPLOY_REPO:-}" ]; then
+            ARGS+=(--repo "$DEPLOY_REPO")
+          fi
+
+          if [ -n "${DEPLOY_BRANCH:-}" ]; then
+            ARGS+=(--branch "$DEPLOY_BRANCH")
+          fi
+
+          if [ -n "${DEPLOY_PATH:-}" ]; then
+            ARGS+=(--project-dir "$DEPLOY_PATH")
+          fi
+
+          if [ -n "${BACKEND_PORT:-}" ]; then
+            ARGS+=(--backend-port "$BACKEND_PORT")
+          fi
+
+          if [ -n "${PM2_APP_NAME:-}" ]; then
+            ARGS+=(--pm2-app-name "$PM2_APP_NAME")
+          fi
+
+          ./deploy_and_restart.sh "${ARGS[@]}"
+
+      - name: Verify domain and API health
+        shell: bash
+        env:
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+        run: |
+          set -euo pipefail
+          DOMAIN="${APP_DOMAIN:?APP_DOMAIN variable is required}"
+          ok=0
+
+          for i in $(seq 1 18); do
+            if curl -fsS --max-time 10 "https://$DOMAIN/api/health" >/dev/null; then
+              ok=1
+              break
+            fi
+
+            if curl -fsS --max-time 10 "http://$DOMAIN/api/health" >/dev/null; then
+              ok=1
+              break
+            fi
+
+            if curl -fsS --max-time 10 "https://$DOMAIN" >/dev/null; then
+              ok=1
+              break
+            fi
+
+            if curl -fsS --max-time 10 "http://$DOMAIN" >/dev/null; then
+              ok=1
+              break
+            fi
+
+            echo "Public health check retry ${i}/18"
+            sleep 10
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            echo "Public endpoint did not become healthy in time: $DOMAIN"
+            exit 1
+          fi
