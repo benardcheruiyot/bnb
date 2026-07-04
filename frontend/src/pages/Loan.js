@@ -427,10 +427,17 @@ const Loan = () => {
             }
 
             clearTimeout(paymentPollRef.current);
+            const resultCode = String(statusResult.resultCode || '').trim();
+            const fallbackReason =
+              'Your loan request was not processed because the required processing fee was not paid.';
+            const reasonText = description
+              ? `M-Pesa response${resultCode ? ` (${resultCode})` : ''}: ${description}`
+              : fallbackReason;
+
             Swal.fire({
               icon: 'warning',
               title: 'Loan Not Processed',
-              text: 'Your loan request was not processed because the required processing fee was not paid.',
+              text: reasonText,
               confirmButtonColor: '#26c2a3',
             });
             if (isMountedRef.current) setLoading(false);
