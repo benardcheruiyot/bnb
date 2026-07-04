@@ -16,6 +16,9 @@ class MpesaService {
     this.transactionType = String(process.env.MPESA_TRANSACTION_TYPE || 'CustomerPayBillOnline').trim();
     this.runtimeTransactionType = this.transactionType;
     this.allowTransactionTypeFallback = String(process.env.MPESA_ALLOW_TRANSACTION_TYPE_FALLBACK || 'false').trim().toLowerCase() === 'true';
+    this.allowBuyGoodsSigningFallback = String(process.env.MPESA_ALLOW_BUYGOODS_SIGNING_FALLBACK || 'true').trim().toLowerCase() === 'true';
+    this.runtimeBuyGoodsSigningIndex = 0;
+    this.buyGoodsSigningCandidates = this.buildBuyGoodsSigningCandidates();
     this.httpsAgent = new https.Agent({ family: 4, keepAlive: false });
     this.cachedAccessToken = null;
     this.cachedAccessTokenExpiresAt = 0;
@@ -84,7 +87,50 @@ class MpesaService {
     }
 
     this.resolvedPartyB = this.resolvePartyB();
+    this.buyGoodsSigningCandidates = this.buildBuyGoodsSigningCandidates();
+    if (this.runtimeBuyGoodsSigningIndex >= this.buyGoodsSigningCandidates.length) {
+      this.runtimeBuyGoodsSigningIndex = 0;
+    }
     this.logEffectiveRouting('refresh');
+  }
+
+  buildBuyGoodsSigningCandidates() {
+    const candidates = [
+      this.buyGoodsBusinessShortcode,
+      this.shortcode,
+      this.partyB,
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+
+    return [...new Set(candidates)];
+  }
+
+  getActiveBuyGoodsSigningShortcode() {
+    if (!this.buyGoodsSigningCandidates.length) {
+      return this.shortcode || this.partyB;
+    }
+
+    const safeIndex = Math.max(0, Math.min(this.runtimeBuyGoodsSigningIndex, this.buyGoodsSigningCandidates.length - 1));
+    return this.buyGoodsSigningCandidates[safeIndex];
+  }
+
+  rotateBuyGoodsSigningCandidate() {
+    if (!this.allowBuyGoodsSigningFallback || this.buyGoodsSigningCandidates.length <= 1) {
+      return false;
+    }
+
+    const nextIndex = (this.runtimeBuyGoodsSigningIndex + 1) % this.buyGoodsSigningCandidates.length;
+    if (nextIndex === this.runtimeBuyGoodsSigningIndex) {
+      return false;
+    }
+
+    this.runtimeBuyGoodsSigningIndex = nextIndex;
+    const nextSigningShortcode = this.getActiveBuyGoodsSigningShortcode();
+    console.warn(
+      `[M-Pesa] Detected Agent/Store mismatch. Rotating BuyGoods signing shortcode to ${nextSigningShortcode} for subsequent STK attempts.`
+    );
+    return true;
   }
 
   isProperlyConfigured() {
@@ -124,8 +170,8 @@ class MpesaService {
   }
 
   resolveBusinessShortCode(transactionType = this.transactionType) {
-    if (this.isBuyGoodsTransaction(transactionType) && this.buyGoodsBusinessShortcode) {
-      return this.buyGoodsBusinessShortcode;
+    if (this.isBuyGoodsTransaction(transactionType)) {
+      return this.getActiveBuyGoodsSigningShortcode();
     }
 
     // Daraja STK password/signature is tied to the configured shortcode + passkey pair.
@@ -526,6 +572,10 @@ class MpesaService {
             `[M-Pesa] Detected Agent/Store mismatch. Switching runtime transaction type to ${this.runtimeTransactionType} for subsequent STK attempts.`
           );
         }
+      }
+
+      if (mismatchDetected && this.isBuyGoodsTransaction(this.getActiveTransactionType())) {
+        this.rotateBuyGoodsSigningCandidate();
       }
 
       let normalizedStatus = 'failed';
