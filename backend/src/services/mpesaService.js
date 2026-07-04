@@ -106,8 +106,12 @@ class MpesaService {
   }
 
   resolveBusinessShortCode(transactionType = this.transactionType) {
-    // Daraja STK password/signature is tied to the shortcode + passkey pair.
-    // Keep BusinessShortCode anchored to shortcode to avoid prompt failures.
+    // For BuyGoods, align signing shortcode with destination store/till account.
+    // For PayBill, keep signing shortcode anchored to configured shortcode.
+    if (this.isBuyGoodsTransaction(transactionType)) {
+      return this.partyB || this.shortcode;
+    }
+
     return this.shortcode || this.partyB;
   }
 
