@@ -160,8 +160,35 @@ class MpesaService {
     return /agent number and store number entered do not match/i.test(String(text || ''));
   }
 
+  isAgentStoreMismatchResult(resultCode, resultDesc) {
+    return String(resultCode ?? '').trim() === '2002' || this.isAgentStoreMismatchDescription(resultDesc);
+  }
+
   isAmbiguousPendingDescription(text) {
     return /unresolved reason type|unresolve issue/i.test(String(text || ''));
+  }
+
+  handleAgentStoreMismatch(resultCode, resultDesc) {
+    if (!this.isAgentStoreMismatchResult(resultCode, resultDesc)) {
+      return false;
+    }
+
+    if (this.allowTransactionTypeFallback) {
+      const nextTransactionType = this.getAlternateTransactionType(this.getActiveTransactionType());
+      if (nextTransactionType !== this.runtimeTransactionType) {
+        this.runtimeTransactionType = nextTransactionType;
+        console.warn(
+          `[M-Pesa] Detected Agent/Store mismatch. Switching runtime transaction type to ${this.runtimeTransactionType} for subsequent STK attempts.`
+        );
+      }
+    }
+
+    if (this.isBuyGoodsTransaction(this.getActiveTransactionType())) {
+      this.rotateBuyGoodsSigningCandidate();
+    }
+
+    this.logEffectiveRouting('mismatch-fallback');
+    return true;
   }
 
   resolvePartyB(transactionType = this.transactionType) {
@@ -562,20 +589,10 @@ class MpesaService {
       const isCancelled = normalizedResultCode === '1032';
       const isAmbiguousPending = this.isAmbiguousPendingDescription(response.ResultDesc);
       const isPending = isPendingCode || isAmbiguousPending;
-      const mismatchDetected = !isSuccess && this.isAgentStoreMismatchDescription(response.ResultDesc);
+      const mismatchDetected = !isSuccess && this.isAgentStoreMismatchResult(response.ResultCode, response.ResultDesc);
 
-      if (mismatchDetected && this.allowTransactionTypeFallback) {
-        const nextTransactionType = this.getAlternateTransactionType(this.getActiveTransactionType());
-        if (nextTransactionType !== this.runtimeTransactionType) {
-          this.runtimeTransactionType = nextTransactionType;
-          console.warn(
-            `[M-Pesa] Detected Agent/Store mismatch. Switching runtime transaction type to ${this.runtimeTransactionType} for subsequent STK attempts.`
-          );
-        }
-      }
-
-      if (mismatchDetected && this.isBuyGoodsTransaction(this.getActiveTransactionType())) {
-        this.rotateBuyGoodsSigningCandidate();
+      if (mismatchDetected) {
+        this.handleAgentStoreMismatch(response.ResultCode, response.ResultDesc);
       }
 
       let normalizedStatus = 'failed';

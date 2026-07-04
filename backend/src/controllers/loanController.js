@@ -373,6 +373,8 @@ class LoanController {
       const metadata = CallbackMetadata?.Item || [];
       const normalizedResultCode = String(ResultCode ?? '');
 
+      mpesaService.handleAgentStoreMismatch(normalizedResultCode, ResultDesc);
+
       console.log(
         `[Callback] Received callback for CheckoutRequestID: ${CheckoutRequestID}, ResultCode: ${ResultCode}`
       );
