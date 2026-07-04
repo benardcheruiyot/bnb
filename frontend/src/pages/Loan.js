@@ -383,14 +383,17 @@ const Loan = () => {
 
             return;
           } else if (
-            statusResult.status === 'failed' ||
-            statusResult.status === 'cancelled' ||
-            statusResult.status === 'expired'
+            statusResult.status === 'pending' &&
+            !autoRetryUsedRef.current &&
+            attempts >= 4
           ) {
-            const description = String(statusResult.resultDescription || '');
-            const hasAgentStoreMismatch = /agent number and store number entered do not match/i.test(description);
+            const pendingCode = String(statusResult.resultCode || '').trim();
+            const pendingDescription = String(statusResult.resultDescription || '');
+            const hasUnresolvedPending =
+              pendingCode === '2029' ||
+              /unresolved reason type|unresolve issue/i.test(pendingDescription);
 
-            if (!autoRetryUsedRef.current && hasAgentStoreMismatch) {
+            if (hasUnresolvedPending) {
               autoRetryUsedRef.current = true;
 
               try {
@@ -410,7 +413,7 @@ const Loan = () => {
                       html: `
                         <div class="stk-modal-content">
                           <div class="stk-spinner" aria-hidden="true"></div>
-                          <p class="stk-instruction">We are sending a new M-Pesa prompt. Enter your PIN on your phone to approve payment.</p>
+                          <p class="stk-instruction">We are retrying M-Pesa using an alternate route. Enter your PIN on your phone to approve payment.</p>
                           <div class="stk-status-pill">Amount: ${formatCurrency(selectedLoan.fee)}</div>
                           <p class="stk-progress-note">Retry request sent successfully.</p>
                           <p class="stk-progress-sub">Waiting for payment confirmation...</p>
@@ -422,8 +425,27 @@ const Loan = () => {
                   return;
                 }
               } catch (retryError) {
-                console.error('Automatic STK retry failed:', retryError);
+                console.error('Automatic STK retry for pending 2029 failed:', retryError);
               }
+            }
+          } else if (
+            statusResult.status === 'failed' ||
+            statusResult.status === 'cancelled' ||
+            statusResult.status === 'expired'
+          ) {
+            const description = String(statusResult.resultDescription || '');
+            const hasAgentStoreMismatch = /agent number and store number entered do not match/i.test(description);
+
+            if (hasAgentStoreMismatch) {
+              clearTimeout(paymentPollRef.current);
+              Swal.fire({
+                icon: 'error',
+                title: 'Payment Configuration Mismatch',
+                text: 'M-Pesa rejected this request because the store/till mapping is not aligned with the merchant setup. Please contact support to update the BuyGoods merchant configuration before retrying.',
+                confirmButtonColor: '#26c2a3',
+              });
+              if (isMountedRef.current) setLoading(false);
+              return;
             }
 
             clearTimeout(paymentPollRef.current);
