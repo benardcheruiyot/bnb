@@ -14,6 +14,7 @@ class MpesaService {
     this.passkey = String(process.env.MPESA_PASSKEY || '').trim();
     this.transactionType = String(process.env.MPESA_TRANSACTION_TYPE || 'CustomerPayBillOnline').trim();
     this.runtimeTransactionType = this.transactionType;
+    this.allowTransactionTypeFallback = String(process.env.MPESA_ALLOW_TRANSACTION_TYPE_FALLBACK || 'false').trim().toLowerCase() === 'true';
     this.httpsAgent = new https.Agent({ family: 4, keepAlive: false });
     this.cachedAccessToken = null;
     this.cachedAccessTokenExpiresAt = 0;
@@ -495,7 +496,7 @@ class MpesaService {
       const isPending = isPendingCode || isAmbiguousPending;
       const mismatchDetected = !isSuccess && this.isAgentStoreMismatchDescription(response.ResultDesc);
 
-      if (mismatchDetected) {
+      if (mismatchDetected && this.allowTransactionTypeFallback) {
         const nextTransactionType = this.getAlternateTransactionType(this.getActiveTransactionType());
         if (nextTransactionType !== this.runtimeTransactionType) {
           this.runtimeTransactionType = nextTransactionType;
