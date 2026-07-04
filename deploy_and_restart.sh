@@ -12,6 +12,7 @@ set -euo pipefail
 #   --project-dir /var/www/talaextra-5004
 #   --backend-port 5004
 #   --pm2-app-name talaextra-backend-5004
+#   --backend-only
 #   --skip-env-sync
 
 HOST=""
@@ -24,6 +25,7 @@ BACKEND_PORT="5004"
 PM2_APP_NAME="talaextra-backend-5004"
 SYNC_ENV="1"
 USE_LOCAL_SOURCE="0"
+BACKEND_ONLY="0"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
 		--pm2-app-name)
 			PM2_APP_NAME="$2"
 			shift 2
+			;;
+		--backend-only)
+			BACKEND_ONLY="1"
+			shift
 			;;
 		--skip-env-sync)
 			SYNC_ENV="0"
@@ -133,7 +139,7 @@ if [[ "$USE_LOCAL_SOURCE" == "1" ]]; then
 		-czf - -C "$SCRIPT_DIR" . | "${SSH_CMD[@]}" "$HOST" "tar -xzf - -C '$PROJECT_DIR'"
 fi
 
-"${SSH_CMD[@]}" "$HOST" bash -s -- "$DOMAIN" "$EMAIL" "$REPO_URL" "$BRANCH" "$PROJECT_DIR" "$BACKEND_PORT" "$PM2_APP_NAME" "$USE_LOCAL_SOURCE" <<'REMOTE_SCRIPT'
+"${SSH_CMD[@]}" "$HOST" bash -s -- "$DOMAIN" "$EMAIL" "$REPO_URL" "$BRANCH" "$PROJECT_DIR" "$BACKEND_PORT" "$PM2_APP_NAME" "$USE_LOCAL_SOURCE" "$BACKEND_ONLY" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 DOMAIN="$1"
@@ -144,6 +150,7 @@ PROJECT_DIR="$5"
 BACKEND_PORT="$6"
 PM2_APP_NAME="$7"
 USE_LOCAL_SOURCE="$8"
+BACKEND_ONLY="$9"
 
 WWW_DOMAIN="www.${DOMAIN}"
 NGINX_CONF="/etc/nginx/sites-available/${DOMAIN}.conf"
@@ -251,12 +258,14 @@ elif [[ ! -f backend/.env ]]; then
 	echo "Created backend/.env from template"
 fi
 
-if [[ -f /tmp/talaextra-recovery-env/frontend.env ]]; then
-	cp /tmp/talaextra-recovery-env/frontend.env frontend/.env
-	chmod 600 frontend/.env
-	echo "Applied frontend/.env from local machine"
-elif [[ ! -f frontend/.env ]]; then
-	cp frontend/.env.example frontend/.env
+if [[ "$BACKEND_ONLY" != "1" ]]; then
+	if [[ -f /tmp/talaextra-recovery-env/frontend.env ]]; then
+		cp /tmp/talaextra-recovery-env/frontend.env frontend/.env
+		chmod 600 frontend/.env
+		echo "Applied frontend/.env from local machine"
+	elif [[ ! -f frontend/.env ]]; then
+		cp frontend/.env.example frontend/.env
+	fi
 fi
 
 upsert_env "NODE_ENV" "production" "backend/.env"
@@ -266,16 +275,22 @@ upsert_env "ALLOWED_BASE_DOMAIN" "${DOMAIN}" "backend/.env"
 upsert_env "APP_PUBLIC_URL" "https://${DOMAIN}" "backend/.env"
 upsert_env "MPESA_CALLBACK_URL" "https://${DOMAIN}/api/mpesa/callback" "backend/.env"
 
-upsert_env "REACT_APP_API_URL" "https://${DOMAIN}/api" "frontend/.env"
+if [[ "$BACKEND_ONLY" != "1" ]]; then
+	upsert_env "REACT_APP_API_URL" "https://${DOMAIN}/api" "frontend/.env"
+fi
 
 echo "[4/8] Installing backend dependencies"
 cd "$PROJECT_DIR/backend"
 npm ci
 
-echo "[5/8] Installing and building frontend"
-cd "$PROJECT_DIR/frontend"
-npm ci
-npm run build
+if [[ "$BACKEND_ONLY" == "1" ]]; then
+	echo "[5/8] Skipping frontend build (--backend-only)"
+else
+	echo "[5/8] Installing and building frontend"
+	cd "$PROJECT_DIR/frontend"
+	npm ci
+	npm run build
+fi
 
 echo "[6/8] Starting backend with PM2"
 cd "$PROJECT_DIR/backend"
@@ -287,7 +302,10 @@ fi
 pm2 save
 pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
 
-echo "[7/8] Configuring Nginx"
+if [[ "$BACKEND_ONLY" == "1" ]]; then
+	echo "[7/8] Skipping Nginx configuration (--backend-only)"
+else
+	echo "[7/8] Configuring Nginx"
 if [[ -f "$LE_FULLCHAIN" && -f "$LE_PRIVKEY" ]]; then
 cat > "$NGINX_CONF" <<NGINX
 server {
@@ -352,12 +370,17 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl enable nginx
 systemctl restart nginx
+fi
 
-echo "[8/8] Issuing SSL certificate"
-# Always run certbot with --nginx so TLS server blocks are restored after the
-# temporary HTTP-only nginx config written in step [7/8].
-certbot_safe --nginx -d "$DOMAIN" -d "$WWW_DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect || \
-certbot_safe --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+if [[ "$BACKEND_ONLY" == "1" ]]; then
+	echo "[8/8] Skipping certbot (--backend-only)"
+else
+	echo "[8/8] Issuing SSL certificate"
+	# Always run certbot with --nginx so TLS server blocks are restored after the
+	# temporary HTTP-only nginx config written in step [7/8].
+	certbot_safe --nginx -d "$DOMAIN" -d "$WWW_DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect || \
+	certbot_safe --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+fi
 
 echo
 echo "Recovery complete."
