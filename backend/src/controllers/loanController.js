@@ -24,7 +24,7 @@ class LoanController {
   isAmbiguousPendingCallback(resultCode, resultDesc) {
     const code = String(resultCode ?? '').trim();
     const description = String(resultDesc || '');
-    return code === '2029' || /unresolved reason type|unresolve issue/i.test(description);
+    return code === '2029' || code === '4999' || /unresolved reason type|unresolve issue|still under processing/i.test(description);
   }
 
   inferLoanAmountFromFee(processingFee) {

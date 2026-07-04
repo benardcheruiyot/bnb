@@ -165,7 +165,7 @@ class MpesaService {
   }
 
   isAmbiguousPendingDescription(text) {
-    return /unresolved reason type|unresolve issue/i.test(String(text || ''));
+    return /unresolved reason type|unresolve issue|still under processing/i.test(String(text || ''));
   }
 
   handleAgentStoreMismatch(resultCode, resultDesc) {
@@ -585,7 +585,7 @@ class MpesaService {
 
       const normalizedResultCode = String(response.ResultCode || '');
       const isSuccess = normalizedResultCode === '0';
-      const isPendingCode = ['1', '1037', '1019', '2029'].includes(String(response.ResultCode || ''));
+      const isPendingCode = ['1', '1037', '1019', '2029', '4999'].includes(String(response.ResultCode || ''));
       const isCancelled = normalizedResultCode === '1032';
       const isAmbiguousPending = this.isAmbiguousPendingDescription(response.ResultDesc);
       const isPending = isPendingCode || isAmbiguousPending;
