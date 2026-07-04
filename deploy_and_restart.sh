@@ -232,6 +232,10 @@ else
 	fi
 
 	cd "$PROJECT_DIR"
+
+	# Keep deploy pulls deterministic even when .env files are tracked in git.
+	# Runtime env values are restored in step [3/8] from synced secrets/templates.
+	rm -f backend/.env frontend/.env
 	git fetch --all --prune
 	git checkout "$BRANCH"
 	git pull origin "$BRANCH"
