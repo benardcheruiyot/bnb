@@ -34,6 +34,18 @@ class MpesaService {
         );
       }
     }
+
+    this.logEffectiveRouting('startup');
+  }
+
+  logEffectiveRouting(source = 'runtime') {
+    const activeTransactionType = this.getActiveTransactionType();
+    const activeBusinessCode = this.resolveBusinessShortCode(activeTransactionType);
+    const activePartyB = this.resolvePartyB(activeTransactionType);
+
+    console.log(
+      `[M-Pesa] Effective routing (${source}) -> SigningShortCode: ${activeBusinessCode}, DestinationPartyB: ${activePartyB}, TransactionType: ${activeTransactionType}`
+    );
   }
 
   refreshRuntimeConfig() {
@@ -72,6 +84,7 @@ class MpesaService {
     }
 
     this.resolvedPartyB = this.resolvePartyB();
+    this.logEffectiveRouting('refresh');
   }
 
   isProperlyConfigured() {
