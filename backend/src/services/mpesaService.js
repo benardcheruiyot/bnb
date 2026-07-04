@@ -10,6 +10,7 @@ class MpesaService {
     this.environment = String(process.env.MPESA_ENVIRONMENT || 'production').trim();
     this.shortcode = String(process.env.MPESA_SHORTCODE || '').trim();
     this.partyB = String(process.env.MPESA_PARTYB || this.shortcode).trim();
+    this.buyGoodsBusinessShortcode = String(process.env.MPESA_BUYGOODS_BUSINESS_SHORTCODE || '').trim();
     this.businessCode = String(this.shortcode || this.partyB).trim();
     this.passkey = String(process.env.MPESA_PASSKEY || '').trim();
     this.transactionType = String(process.env.MPESA_TRANSACTION_TYPE || 'CustomerPayBillOnline').trim();
@@ -44,6 +45,9 @@ class MpesaService {
 
     const latestShortcode = String(process.env.MPESA_SHORTCODE || '').trim();
     const latestPartyB = String(process.env.MPESA_PARTYB || latestShortcode).trim();
+    const latestBuyGoodsBusinessShortcode = String(
+      process.env.MPESA_BUYGOODS_BUSINESS_SHORTCODE || ''
+    ).trim();
     const latestTransactionType = String(
       process.env.MPESA_TRANSACTION_TYPE || 'CustomerPayBillOnline'
     ).trim();
@@ -54,6 +58,7 @@ class MpesaService {
 
     this.shortcode = latestShortcode;
     this.partyB = latestPartyB;
+    this.buyGoodsBusinessShortcode = latestBuyGoodsBusinessShortcode;
     this.businessCode = String(this.resolveBusinessShortCode(latestTransactionType)).trim();
     this.passkey = latestPasskey || this.passkey;
     this.consumerKey = latestConsumerKey || this.consumerKey;
@@ -106,6 +111,10 @@ class MpesaService {
   }
 
   resolveBusinessShortCode(transactionType = this.transactionType) {
+    if (this.isBuyGoodsTransaction(transactionType) && this.buyGoodsBusinessShortcode) {
+      return this.buyGoodsBusinessShortcode;
+    }
+
     // Daraja STK password/signature is tied to the configured shortcode + passkey pair.
     // Keep BusinessShortCode anchored to shortcode to avoid merchant configuration rejection.
     return this.shortcode || this.partyB;
